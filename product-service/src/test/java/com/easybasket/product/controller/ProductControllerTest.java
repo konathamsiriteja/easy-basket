@@ -192,4 +192,15 @@ class ProductControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.stock").value(0));
     }
+
+    @Test
+    void createProduct_malformedJson_returns400() throws Exception {
+        mockMvc.perform(post("/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"name\": \"Wireless Mouse\", "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        verifyNoInteractions(productService);
+    }
 }
