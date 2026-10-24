@@ -1,87 +1,70 @@
-# Testing Strategy & Coverage Verification: Create Product API (KAN-7)
+# Testing Strategy & Coverage Verification: Get Product API (KAN-15)
 
-**Verified by**: Independent test verification (Test Agent), not the implementing developer.
-**Branch**: `feature/KAN-7-create-product-api`
+**Branch**: `feature/KAN-15-get-product`
 **Module**: `product-service`
-**Verdict**: **PASS** — 45/45 tests pass, 100% line and 100% branch coverage on the JaCoCo-enforced bundle, 98.73% overall instruction coverage across the module (threshold ≥80%). All acceptance-criteria scenarios in [requirements.md](requirements.md) have automated test coverage, including the newly added malformed-JSON negative scenario.
-
-**Re-verification note (this pass)**: Re-run after two fixes were applied on top of the original verification: (1) the H2 console is now disabled by default in `src/main/resources/application.yml` (`spring.h2.console.enabled: false`), closing the OWASP A05 security-misconfiguration finding; (2) a new `@ExceptionHandler(HttpMessageNotReadableException.class)` was added to `GlobalExceptionHandler` returning 400 for malformed/unreadable JSON bodies, backed by a new `ProductControllerTest#createProduct_malformedJson_returns400` test. The developer's claim of **45 tests passing, 98.73% instruction coverage, BUILD SUCCESS** was independently reproduced and matches exactly.
+**Verdict**: **PASS** — 68/68 tests pass, 100% line and 87.5% branch coverage on the JaCoCo-enforced bundle (threshold ≥80% for both), `mvn verify` exits `0` (`BUILD SUCCESS`, JaCoCo `check` goal passed).
 
 ## 1. Testing Approach
 
+Per `documents/architecture.md` §6 and the project's `testing-standards.md` rule, each test layer mirrors what's under test:
+
 - **Unit tests** (JUnit 5 + Mockito + AssertJ):
-  - `ProductRequestValidationTest` — Bean Validation (`jakarta.validation`) rules on `ProductRequest` exercised directly via `Validator`, independent of Spring MVC.
-  - `ProductServiceImplTest` — service layer logic mocked against `ProductRepository`.
-  - `ProductTest`, `ProductResponseTest`, `ErrorResponseTest` — entity/DTO construction, getters/setters, equality.
-  - `GlobalExceptionHandlerTest` — handler methods invoked directly with mocked `MethodArgumentNotValidException` / generic `RuntimeException`.
-- **Slice/integration tests**:
-  - `ProductControllerTest` — `@WebMvcTest` with `ProductService` mocked and `GlobalExceptionHandler` imported; exercises the full HTTP request/response cycle (status codes, JSON body, headers) without a real database.
-  - `ProductRepositoryTest` — `@DataJpaTest` against the real H2 datasource, verifying persistence.
+  - `ProductServiceImplTest` — `getProductById` found (asserts derived `availability` for both `IN_STOCK`/`OUT_OF_STOCK` boundaries) and not-found (`ProductNotFoundException`); `createProduct` updated for the new optional `description` field.
+  - `GlobalExceptionHandlerTest` — new `handleProductNotFound` (→404) and `handleTypeMismatch` (→400) handlers invoked directly.
+  - `ProductTest`, `ProductResponseTest`, `ProductRequestValidationTest`, `ProductNotFoundExceptionTest` — new `description`/`availability` fields, constructors, getters/setters, and the `@Size(max=1000)` validation boundary (1000 chars valid, 1001 rejected).
+- **Slice tests**:
+  - `ProductControllerTest` — `@WebMvcTest`: new `GET /products/{productId}` positive (200 + full body shape incl. `description`/`availability`), not-found (404 + `ErrorResponse`), and malformed-ID (`/products/abc` → 400 + `ErrorResponse`).
+  - `ProductRepositoryTest` — `@DataJpaTest`: persists/reads `description` (set and `null`), confirms non-existent ID returns an empty `Optional`.
 - **End-to-end test**:
-  - `ProductServiceApplicationIntegrationTest` — `@SpringBootTest` + `@AutoConfigureMockMvc`, full application context, real H2 persistence, happy path and invalid-payload error path.
-- **Coverage tool**: JaCoCo Maven plugin `0.8.12`, `prepare-agent` execution during `test`, `report` execution during `test`, `check` execution during `verify` enforcing a `BUNDLE`-level rule of `LINE COVEREDRATIO ≥ 0.80` and `BRANCH COVEREDRATIO ≥ 0.80`, excluding `ProductServiceApplication.class` and the `com/easybasket/product/config/**` package (per `product-service/pom.xml`).
+  - `ProductServiceApplicationIntegrationTest` — `@SpringBootTest` + `@AutoConfigureMockMvc`, real H2: full create → get happy path, not-found path, and malformed-ID path.
+- **Coverage tool**: JaCoCo Maven plugin `0.8.12`, `check` goal bound to `verify`, `BUNDLE`-level `LINE COVEREDRATIO ≥ 0.80` and `BRANCH COVEREDRATIO ≥ 0.80`, excluding `ProductServiceApplication.class` and `com/easybasket/product/config/**` (unchanged from KAN-7, per `product-service/pom.xml`).
 
 ## 2. Commands Run
 
-Command executed exactly as claimed by the developer, from the `product-service` module directory (run via `cmd /c` with output redirected to a log file, since PowerShell's stderr handling of Maven's native JVM warnings otherwise truncates the stream):
-
 ```
-mvn clean verify
+mvn verify
 ```
 
-**Actual result**: exit code `0` — `BUILD SUCCESS`. The `verify` phase includes the JaCoCo `check` goal, which fails the build if the 80% threshold is not met; a `0` exit code confirms the check passed.
+Run from `product-service/`. **Result**: exit code `0` — `BUILD SUCCESS`. The `verify` phase includes the JaCoCo `check` goal, which fails the build if either the 80% line or 80% branch threshold is not met; a `0` exit code confirms both thresholds were met.
 
-Test summary extracted directly from the console output of this run:
+Per-class test counts (from `target/surefire-reports/*.txt`):
 
 ```
-Tests run: 13, Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.controller.ProductControllerTest
-Tests run: 2,  Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.dto.ErrorResponseTest
-Tests run: 12, Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.dto.ProductRequestValidationTest
-Tests run: 2,  Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.dto.ProductResponseTest
-Tests run: 6,  Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.entity.ProductTest
-Tests run: 2,  Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.exception.GlobalExceptionHandlerTest
-Tests run: 2,  Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.ProductServiceApplicationIntegrationTest
-Tests run: 4,  Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.repository.ProductRepositoryTest
-Tests run: 2,  Failures: 0, Errors: 0, Skipped: 0 -- com.easybasket.product.service.ProductServiceImplTest
-
-[INFO] Tests run: 45, Failures: 0, Errors: 0, Skipped: 0
-[INFO] All coverage checks have been met.
-[INFO] BUILD SUCCESS
+ProductControllerTest                     16 tests
+ProductServiceImplTest                     6 tests
+GlobalExceptionHandlerTest                 4 tests
+ProductNotFoundExceptionTest               1 test
+ProductRepositoryTest                      7 tests
+ProductServiceApplicationIntegrationTest   5 tests
+ProductTest                                8 tests
+ProductResponseTest                        4 tests
+ProductRequestValidationTest              15 tests
+ErrorResponseTest                          2 tests
+---------------------------------------------------
+Total: 68 tests, 0 failures, 0 errors, 0 skipped
 ```
-
-Total: **45 tests, 0 failures, 0 errors, 0 skipped** — matches the developer's claim exactly. `ProductControllerTest` grew from 12 to 13 tests (the new `createProduct_malformedJson_returns400` case), accounting for the increase from the previously-verified 44 to the current 45.
 
 Note: one `ERROR`-level log line appears mid-run from `GlobalExceptionHandler : Unhandled exception while processing request` — this is expected application logging triggered intentionally by `GlobalExceptionHandlerTest#handleGeneric_returnsInternalServerError`, not a test or build failure.
 
 ## 3. Coverage Summary
 
-Measured from `product-service/target/site/jacoco/jacoco.csv` generated by the same `mvn clean verify` run (raw counters, not rounded from an external source):
+Measured from `product-service/target/site/jacoco/jacoco.csv` generated by the same `mvn verify` run:
 
 | Class (bundle scope: excludes `ProductServiceApplication` and `config/**`) | Instructions Missed/Covered | Lines Missed/Covered | Branches Missed/Covered |
 |---|---|---|---|
-| `entity.Product` | 0 / 82 | 0 / 29 | 0 / 4 |
-| `exception.GlobalExceptionHandler` | 0 / 74 | 0 / 24 | 0 / 0 |
-| `service.ProductServiceImpl` | 0 / 38 | 0 / 15 | 0 / 0 |
-| `controller.ProductController` | 0 / 16 | 0 / 5 | 0 / 0 |
-| `dto.ProductResponse` | 0 / 56 | 0 / 24 | 0 / 0 |
+| `exception.ProductNotFoundException` | 0 / 11 | 0 / 4 | 0 / 0 |
+| `exception.GlobalExceptionHandler` | 0 / 109 | 0 / 38 | 0 / 0 |
+| `entity.Product` | 0 / 107 | 0 / 39 | 0 / 4 |
+| `service.ProductServiceImpl` | 0 / 76 | 0 / 22 | 1 / 3 |
+| `controller.ProductController` | 0 / 24 | 0 / 7 | 0 / 0 |
+| `dto.ProductResponse` | 0 / 94 | 0 / 39 | 0 / 0 |
 | `dto.ErrorResponse` | 0 / 56 | 0 / 24 | 0 / 0 |
-| `dto.ProductRequest` | 0 / 46 | 0 / 20 | 0 / 0 |
-| **Enforced bundle total** | **0 / 368 → 100%** | **0 / 141 → 100% line** | **0 / 4 → 100% branch** |
+| `dto.ProductRequest` | 0 / 71 | 0 / 30 | 0 / 0 |
+| **Enforced bundle total** | **0 / 548 → 100%** | **0 / 203 → 100% line** | **1 / 7 → 87.5% branch** |
 
-Both the LINE and BRANCH `COVEREDRATIO` are 1.00 on the enforced bundle, well above the 0.80 (80%) minimum enforced by the `jacoco-maven-plugin` `check` goal in `pom.xml`. `GlobalExceptionHandler` grew from 18 to 24 covered lines (74 instructions), reflecting the new `handleMalformedJson` handler, and remains at 100%.
+Both thresholds are met: **100% line coverage** and **87.5% branch coverage** on the enforced bundle, above the 80% minimum. The single uncovered branch is in `ProductServiceImpl` (`toResponse`'s `product.getStock() != null` null-guard — unreachable in practice since `stock` is a non-nullable column, but kept as a defensive guard consistent with the method signature).
 
-Overall module-wide **instruction coverage** (including the two classes excluded from the enforced rule) computed from the full `jacoco.csv`:
-
-```
-Instruction coverage: 98.73% (388/393)
-Branch coverage:      100.00% (4/4)
-```
-
-This matches the developer's claim of **98.73% instruction coverage** exactly. The 5 missed instructions all belong to `ProductServiceApplication` (the `main()` bootstrap method), which is explicitly excluded from the enforced `check` rule:
-- `ProductServiceApplication` (main entry point): 5 instructions / 2 lines missed, 3 instructions / 1 line covered.
-- `config.OpenApiConfig`: fully covered (0 missed / 17 instructions, 6 lines) — excluded regardless per the pom rule.
-
-This exclusion is a reasonable and disclosed choice (main-method bootstrap and static Swagger config carry little business-logic risk) and does not inflate the reported percentage in a misleading way — it's visible directly in `pom.xml` and reproducible.
+Overall module-wide coverage (including the two classes excluded from the enforced rule, `ProductServiceApplication` and `config.OpenApiConfig`): **99.1% instruction**, **99.1% line**, **87.5% branch** — consistent with the enforced-bundle numbers; the only misses are the excluded `main()` bootstrap method.
 
 ## 4. Scenarios Covered
 
@@ -89,32 +72,23 @@ Cross-checked against the Acceptance Criteria in [requirements.md](requirements.
 
 | Acceptance Criteria | Covered? | Test(s) |
 |---|---|---|
-| `POST /products` implemented per contract, returns 201 + body, no `Location` header | ✅ | `ProductControllerTest#createProduct_validRequest_returns201WithBodyAndNoLocationHeader`, `ProductServiceApplicationIntegrationTest#createProduct_happyPath_persistsAndReturns201WithoutLocationHeader` |
-| Missing `name` → 4xx | ✅ | `ProductControllerTest#createProduct_missingName_returns400`, `ProductRequestValidationTest#blankName_isRejected` |
-| Missing `category` → 4xx | ✅ | `ProductControllerTest#createProduct_missingCategory_returns400`, `ProductRequestValidationTest#blankCategory_isRejected` |
-| Missing `price` → 4xx | ✅ | `ProductControllerTest#createProduct_missingPrice_returns400`, `ProductRequestValidationTest#nullPrice_isRejected` |
-| Missing `stock` → 4xx | ✅ | `ProductControllerTest#createProduct_missingStock_returns400`, `ProductRequestValidationTest#nullStock_isRejected` |
-| Negative `price` rejected | ✅ | `ProductControllerTest#createProduct_negativePrice_returns400`, `ProductRequestValidationTest#negativePrice_isRejected` |
-| `price = 0` rejected (must be > 0) | ✅ | `ProductControllerTest#createProduct_zeroPrice_returns400`, `ProductRequestValidationTest#zeroPrice_isRejected` |
-| Negative `stock` rejected | ✅ | `ProductControllerTest#createProduct_negativeStock_returns400`, `ProductRequestValidationTest#negativeStock_isRejected` |
-| `stock = 0` boundary is **valid** (per requirements assumption #4) | ✅ | `ProductControllerTest#createProduct_zeroStock_isValidBoundaryAndReturns201`, `ProductRequestValidationTest#zeroStock_isValidBoundary`, `ProductServiceImplTest#createProduct_stockZero_isPersistedAsValidBoundary` |
-| Oversized `name` (>255 chars) rejected | ✅ | `ProductControllerTest#createProduct_oversizedName_returns400`, `ProductRequestValidationTest#oversizedName_isRejected` |
-| Oversized `category` (>255 chars) rejected | ✅ | `ProductControllerTest#createProduct_oversizedCategory_returns400`, `ProductRequestValidationTest#oversizedCategory_isRejected` |
-| `price` with more than 2 decimal places rejected | ✅ | `ProductControllerTest#createProduct_priceWithMoreThanTwoDecimals_returns400`, `ProductRequestValidationTest#priceWithTooManyDecimals_isRejected` |
-| Unique product ID generated per creation | ✅ | `ProductServiceImplTest#createProduct_mapsRequestToEntity_savesAndReturnsResponse` (asserts unsaved entity has null ID, response has DB-assigned ID), `ProductRepositoryTest` |
-| Product persisted in H2 | ✅ | `ProductRepositoryTest` (`@DataJpaTest`), `ProductServiceApplicationIntegrationTest` (real H2, full context) |
-| Failures return consistent error response via global exception handler | ✅ | `GlobalExceptionHandlerTest#handleValidation_returnsBadRequestWithFieldErrors`, `GlobalExceptionHandlerTest#handleGeneric_returnsInternalServerError`, `ProductServiceApplicationIntegrationTest#createProduct_invalidPayload_returns400WithErrorResponseShape` |
-| Request/response payload shape matches contract | ✅ | `ProductControllerTest` JSON-path assertions, `ProductResponseTest`, `ErrorResponseTest` |
-| Malformed/unreadable JSON request body returns a consistent 400 error (not 500) | ✅ | `ProductControllerTest#createProduct_malformedJson_returns400` (asserts `400` status, `status: 400` in body, and `verifyNoInteractions(productService)`), backed by `GlobalExceptionHandler#handleMalformedJson` |
+| `GET /products/{productId}` implemented per contract (path, method, status codes) | ✅ | `ProductControllerTest#getProductById_found_returns200WithFullBodyShape` |
+| Retrieves product details using a valid ID from H2 | ✅ | `ProductServiceApplicationIntegrationTest#getProductById_happyPath_returns200WithPersistedProduct`, `ProductRepositoryTest#save_withDescription_persistsAndFindByIdReturnsIt` |
+| Found → `200 OK` with product details | ✅ | `ProductControllerTest#getProductById_found_returns200WithFullBodyShape`, `ProductServiceImplTest#getProductById_found_mapsEntityAndDerivesInStockAvailability` |
+| Not found → `404 Not Found` | ✅ | `ProductControllerTest#getProductById_notFound_returns404WithErrorResponseShape`, `ProductServiceImplTest#getProductById_notFound_throwsProductNotFoundException`, `GlobalExceptionHandlerTest#handleProductNotFound_returnsNotFoundWithMessage`, `ProductServiceApplicationIntegrationTest#getProductById_nonExistentId_returns404WithErrorResponseShape` |
+| Malformed/non-numeric `productId` → `4xx` (not an unhandled error) | ✅ | `ProductControllerTest#getProductById_malformedId_returns400WithErrorResponseShape`, `GlobalExceptionHandlerTest#handleTypeMismatch_returnsBadRequestWithMessage`, `ProductServiceApplicationIntegrationTest#getProductById_malformedId_returns400WithErrorResponseShape` |
+| Response includes `description` and derived `availability` | ✅ | `ProductControllerTest#getProductById_found_returns200WithFullBodyShape`, `ProductServiceImplTest#getProductById_found_mapsEntityAndDerivesInStockAvailability`, `ProductServiceImplTest#getProductById_found_zeroStock_derivesOutOfStockAvailability` |
+| `availability` boundary: `stock > 0` → `IN_STOCK`, `stock = 0` → `OUT_OF_STOCK` | ✅ | `ProductServiceImplTest#getProductById_found_mapsEntityAndDerivesInStockAvailability` (stock=100), `ProductServiceImplTest#getProductById_found_zeroStock_derivesOutOfStockAvailability` (stock=0) |
+| `createProduct` continues to function with optional `description` (non-breaking) | ✅ | `ProductServiceImplTest#createProduct_mapsRequestToEntity_savesAndReturnsResponse`, `ProductServiceImplTest#createProduct_withoutDescription_persistsNullDescription` |
+| `description` persists (set) and defaults to `null` (unset) | ✅ | `ProductRepositoryTest#save_withDescription_persistsAndFindByIdReturnsIt`, `ProductRepositoryTest#save_withoutDescription_persistsAsNull` |
+| `description` max-length boundary (1000 valid, 1001 rejected) | ✅ | `ProductRequestValidationTest#descriptionAtMaxLength_isValid`, `ProductRequestValidationTest#oversizedDescription_isRejected` |
+| Appropriate HTTP status codes for success/failure | ✅ | All `ProductControllerTest` and `ProductServiceApplicationIntegrationTest` GET-endpoint tests |
+| Follows existing layering/conventions (thin controller, service/repository separation) | ✅ | Verified by inspection against `documents/architecture.md` §3; no ad hoc try/catch added |
 
-All positive, negative, validation, and boundary scenarios named in the user's cross-check list (missing fields, `price` = 0/negative, negative stock, oversized name/category, price with >2 decimals, `stock` = 0 boundary, malformed JSON body) have direct automated test coverage at both the unit-validation level and the HTTP-controller level, with the happy path additionally re-verified end-to-end.
+All positive, negative, boundary, and contract-alignment scenarios from `requirements.md` §6 have direct automated test coverage.
 
 ## 5. Gaps & Follow-ups
 
-- **Resolved since last verification**: malformed/non-JSON request bodies are now explicitly covered by `ProductControllerTest#createProduct_malformedJson_returns400`, and the previously-generic 500 response is now a proper 400 via `GlobalExceptionHandler#handleMalformedJson`. This also closes an implicit information-disclosure/robustness concern (unhandled parse errors no longer surface a 500 with a stack-trace-adjacent generic handler).
-- **Resolved since last verification**: the H2 console is now disabled by default (`spring.h2.console.enabled: false` in `src/main/resources/application.yml`), closing the OWASP A05 (Security Misconfiguration) finding — no test asserts this directly, but it is a configuration-only change verifiable by inspection and does not require a dedicated test case.
-- No negative test exists for a **duplicate product name** — but per requirements.md open question #6, this is explicitly assumed out of scope (no uniqueness constraint required), so this is not a gap against current acceptance criteria.
-- Coverage is measured and enforced only on the `product-service` module; there is no cross-module or contract-test verification against the actual Swagger/OpenAPI document (requirements.md flags the authoritative contract location as an open question). Recommend confirming/adding an OpenAPI schema diff check once the contract source is available.
-- The 80% JaCoCo threshold excludes `ProductServiceApplication` and `config/**`; this is a reasonable, standard exclusion but should remain visible/documented in the pom (it currently is) so it isn't mistaken for gaming the metric.
-
-No coverage or scenario gaps were found that block acceptance of KAN-7 against the current [requirements.md](requirements.md) acceptance criteria.
+- No gaps block acceptance of KAN-15 against the current acceptance criteria.
+- `description` backfill for pre-existing rows is explicitly out of scope (per `impl-plan.md` §4) — unset/historical rows return `description: null`, covered by `ProductRepositoryTest#save_withoutDescription_persistsAsNull`.
+- The one uncovered branch (`ProductServiceImpl` null-guard on `stock`) is a defensive check against a column that is `@Column(nullable = false)`; adding a test would require bypassing bean validation to construct an invalid state, which is not a realistic path and was judged not worth the added test complexity given the bundle is already at 87.5% branch coverage (above threshold).

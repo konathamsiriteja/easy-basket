@@ -30,6 +30,9 @@ public class Product {
     @Column(nullable = false)
     private Integer stock;
 
+    @Column(length = 1000)
+    private String description;
+
     public Product() {
     }
 
@@ -38,6 +41,14 @@ public class Product {
         this.category = category;
         this.price = price;
         this.stock = stock;
+    }
+
+    public Product(String name, String category, BigDecimal price, Integer stock, String description) {
+        this.name = name;
+        this.category = category;
+        this.price = price;
+        this.stock = stock;
+        this.description = description;
     }
 
     public Long getId() {
@@ -78,6 +89,14 @@ public class Product {
 
     public void setStock(Integer stock) {
         this.stock = stock;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
     }
 
     @Override

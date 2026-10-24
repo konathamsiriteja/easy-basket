@@ -3,6 +3,7 @@ package com.easybasket.product.service;
 import com.easybasket.product.dto.ProductRequest;
 import com.easybasket.product.dto.ProductResponse;
 import com.easybasket.product.entity.Product;
+import com.easybasket.product.exception.ProductNotFoundException;
 import com.easybasket.product.repository.ProductRepository;
 import org.springframework.stereotype.Service;
 
@@ -21,15 +22,32 @@ public class ProductServiceImpl implements ProductService {
                 request.getName(),
                 request.getCategory(),
                 request.getPrice(),
-                request.getStock());
+                request.getStock(),
+                request.getDescription());
 
         Product saved = productRepository.save(product);
 
+        return toResponse(saved);
+    }
+
+    @Override
+    public ProductResponse getProductById(Long productId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+
+        return toResponse(product);
+    }
+
+    private ProductResponse toResponse(Product product) {
+        String availability = product.getStock() != null && product.getStock() > 0 ? "IN_STOCK" : "OUT_OF_STOCK";
+
         return new ProductResponse(
-                saved.getId(),
-                saved.getName(),
-                saved.getCategory(),
-                saved.getPrice(),
-                saved.getStock());
+                product.getId(),
+                product.getName(),
+                product.getCategory(),
+                product.getPrice(),
+                product.getStock(),
+                product.getDescription(),
+                availability);
     }
 }

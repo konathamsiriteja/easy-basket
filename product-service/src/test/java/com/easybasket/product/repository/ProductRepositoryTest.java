@@ -58,4 +58,32 @@ class ProductRepositoryTest {
         List<Product> all = productRepository.findAll();
         assertThat(all).hasSize(2);
     }
+
+    @Test
+    void save_withDescription_persistsAndFindByIdReturnsIt() {
+        Product product = new Product("Wireless Mouse", "Electronics", new BigDecimal("19.99"), 100,
+                "Ergonomic wireless mouse");
+
+        Product saved = productRepository.save(product);
+
+        Product found = productRepository.findById(saved.getId()).orElseThrow();
+        assertThat(found.getDescription()).isEqualTo("Ergonomic wireless mouse");
+    }
+
+    @Test
+    void save_withoutDescription_persistsAsNull() {
+        Product product = new Product("Widget", "Tools", new BigDecimal("5.00"), 10);
+
+        Product saved = productRepository.save(product);
+
+        Product found = productRepository.findById(saved.getId()).orElseThrow();
+        assertThat(found.getDescription()).isNull();
+    }
+
+    @Test
+    void findById_nonExistentId_returnsEmptyOptional() {
+        Optional<Product> found = productRepository.findById(9999L);
+
+        assertThat(found).isEmpty();
+    }
 }

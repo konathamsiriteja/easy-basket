@@ -34,6 +34,10 @@ public class ProductRequest {
     @Schema(description = "Available stock quantity", example = "100")
     private Integer stock;
 
+    @Size(max = 1000, message = "description must not exceed 1000 characters")
+    @Schema(description = "Product description", example = "Ergonomic wireless mouse with USB receiver")
+    private String description;
+
     public ProductRequest() {
     }
 
@@ -42,6 +46,14 @@ public class ProductRequest {
         this.category = category;
         this.price = price;
         this.stock = stock;
+    }
+
+    public ProductRequest(String name, String category, BigDecimal price, Integer stock, String description) {
+        this.name = name;
+        this.category = category;
+        this.price = price;
+        this.stock = stock;
+        this.description = description;
     }
 
     public String getName() {
@@ -74,5 +86,13 @@ public class ProductRequest {
 
     public void setStock(Integer stock) {
         this.stock = stock;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
     }
 }

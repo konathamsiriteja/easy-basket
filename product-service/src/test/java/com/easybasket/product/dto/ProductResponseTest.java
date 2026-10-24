@@ -34,4 +34,23 @@ class ProductResponseTest {
         assertThat(response.getPrice()).isEqualByComparingTo("5.00");
         assertThat(response.getStock()).isZero();
     }
+
+    @Test
+    void fullArgsConstructor_populatesDescriptionAndAvailability() {
+        ProductResponse response = new ProductResponse(3L, "Wireless Mouse", "Electronics",
+                new BigDecimal("19.99"), 100, "Ergonomic wireless mouse", "IN_STOCK");
+
+        assertThat(response.getDescription()).isEqualTo("Ergonomic wireless mouse");
+        assertThat(response.getAvailability()).isEqualTo("IN_STOCK");
+    }
+
+    @Test
+    void setters_populateDescriptionAndAvailability() {
+        ProductResponse response = new ProductResponse();
+        response.setDescription("Tactile mechanical keyboard");
+        response.setAvailability("OUT_OF_STOCK");
+
+        assertThat(response.getDescription()).isEqualTo("Tactile mechanical keyboard");
+        assertThat(response.getAvailability()).isEqualTo("OUT_OF_STOCK");
+    }
 }
