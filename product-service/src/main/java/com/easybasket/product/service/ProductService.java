@@ -6,4 +6,6 @@ import com.easybasket.product.dto.ProductResponse;
 public interface ProductService {
 
     ProductResponse createProduct(ProductRequest request);
+
+    ProductResponse getProductById(Long productId);
 }

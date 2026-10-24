@@ -1,4 +1,4 @@
-# Implementation Plan: Create Product API (KAN-7)
+# Implementation Plan: Get Product API (KAN-15)
 
 **Source documents**: [documents/architecture.md](documents/architecture.md), [documents/design-review.md](documents/design-review.md)
 
@@ -6,58 +6,55 @@
 
 | ID | Title | Priority | Depends On | Status |
 |---|---|---|---|---|
-| T1 | Project/module scaffolding (Maven `product` service: `pom.xml`, Spring Boot 3.x parent, `web`/`validation`/`data-jpa`/`h2`/`springdoc-openapi`/JaCoCo dependencies, base package structure, `Application` main class) | Critical | — | Ready |
-| T2 | H2 datasource configuration (`application.yml`/`.properties`: file-based H2 URL, Hibernate DDL mode, dialect; H2 console toggle for dev) | High | T1 | Blocked (waiting on T1) |
-| T3 | `Product` JPA entity (`id` `GenerationType.IDENTITY`, `name`, `category` capped at 255, `price` `BigDecimal`, `stock` `Integer`; no uniqueness constraint on `name`) | High | T1 | Blocked (waiting on T1) |
-| T4 | `ProductRepository` (`extends JpaRepository<Product, Long>`) | High | T3 | Blocked (waiting on T3) |
-| T5 | `ErrorResponse` DTO (`status`, `error`, `message`, `fieldErrors[]`, `timestamp`) | Medium | T1 | Blocked (waiting on T1) |
-| T6 | `GlobalExceptionHandler` (`@RestControllerAdvice`, one instance for this microservice): handlers for `MethodArgumentNotValidException` (field-level errors) and generic `Exception` (500 fallback), both returning `ErrorResponse` | High | T5 | Blocked (waiting on T5) |
-| T7 | `ProductRequest` DTO with Bean Validation annotations (`@NotBlank @Size(max=255)` on `name`/`category`; `@NotNull @Positive @Digits(integer=..., fraction=2)` on `price`; `@NotNull @PositiveOrZero` on `stock`) | High | T1 | Blocked (waiting on T1) |
-| T8 | `ProductResponse` DTO (`id`, `name`, `category`, `price`, `stock`) | Medium | T1 | Blocked (waiting on T1) |
-| T9 | `ProductService` interface + `ProductServiceImpl` (`createProduct(ProductRequest) -> ProductResponse`: maps request → entity, calls `ProductRepository.save`, maps saved entity → response) | Critical | T3, T4, T7, T8 | Blocked (waiting on T3, T4, T7, T8) |
-| T10 | `ProductController` (`POST /products` only, `@Valid @RequestBody ProductRequest`, delegates to `ProductService`, returns `201 Created` with `ProductResponse` body, no `Location` header) | Critical | T7, T8, T9 | Blocked (waiting on T7, T8, T9) |
-| T11 | springdoc-openapi setup (OpenAPI config bean/properties, `@Operation`/`@Schema`/`@ApiResponse` annotations on `ProductController`/DTOs, verify `/v3/api-docs` and `/swagger-ui.html`) | Medium | T10 | Blocked (waiting on T10) |
-| T12 | Unit tests: `ProductServiceImplTest` (Mockito, mapping + repository interaction), `ProductRequest` validation unit tests, `GlobalExceptionHandlerTest` | High | T6, T7, T9 | Blocked (waiting on T6, T7, T9) |
-| T13 | Controller tests (`@WebMvcTest ProductController`): positive create; negative/boundary — missing `name`/`category`/`price`/`stock`, `price` zero/negative, `price` with >2 decimals, `stock` negative, oversized `name`/`category` (>255 chars) | High | T10, T6 | Blocked (waiting on T10, T6) |
-| T14 | Repository/persistence tests (`@DataJpaTest`) for `Product` entity + `ProductRepository`: save/generated-ID behavior, boundary values (`price` 2-decimal precision, `stock = 0`) | Medium | T2, T3, T4 | Blocked (waiting on T2, T3, T4) |
-| T15 | Integration test (`@SpringBootTest`, full context + H2): end-to-end `POST /products` happy path (201 + body shape, no `Location` header) and error path (400 + `ErrorResponse` shape) | High | T2, T4, T6, T10 | Blocked (waiting on T2, T4, T6, T10) |
-| T16 | JaCoCo coverage verification: bind `report`/`check` goals to Maven `verify`, enforce ≥80% line/branch coverage on the `product` package, fix any gaps surfaced by T12–T15 | Medium | T12, T13, T14, T15 | Blocked (waiting on T12, T13, T14, T15) |
+| T1 | Extend `Product` JPA entity: add nullable `description` column (`@Column(length = 1000)`), getter/setter, update constructor(s) and `equals`/`hashCode` as needed (`product-service/src/main/java/com/easybasket/product/entity/Product.java`) | Critical | — | Ready |
+| T2 | Extend `ProductResponse` DTO: add `description: String` and `availability: String` fields, getters/setters, `@Schema` annotations, update constructor (`.../dto/ProductResponse.java`) | Critical | — | Ready |
+| T3 | Extend `ProductRequest` DTO: add optional `description: String` field (`@Size(max = 1000)`, no `@NotBlank`), getter/setter, `@Schema` annotation (`.../dto/ProductRequest.java`) | High | — | Ready |
+| T4 | New `ProductNotFoundException` (unchecked `RuntimeException`, carries `productId`) (`.../exception/ProductNotFoundException.java`) | Critical | — | Ready |
+| T5 | Extend `GlobalExceptionHandler`: add `@ExceptionHandler(ProductNotFoundException.class)` → `404` `ErrorResponse`; add `@ExceptionHandler(MethodArgumentTypeMismatchException.class)` → `400` `ErrorResponse` (`.../exception/GlobalExceptionHandler.java`) | Critical | T4 | Blocked (waiting on T4) |
+| T6 | Extend `ProductServiceImpl.createProduct` to pass `description` from `ProductRequest` into the new `Product` constructor/setter arg (keeps create flow consistent with the extended entity) | High | T1, T3 | Blocked (waiting on T1, T3) |
+| T7 | Add `ProductService.getProductById(Long)` to the interface, implement in `ProductServiceImpl`: `productRepository.findById(id)`, throw `ProductNotFoundException` if empty, else map entity → `ProductResponse` deriving `availability` (`stock > 0 ? "IN_STOCK" : "OUT_OF_STOCK"`) (`.../service/ProductService.java`, `.../service/ProductServiceImpl.java`) | Critical | T1, T2, T4 | Blocked (waiting on T1, T2, T4) |
+| T8 | Add `GET /products/{productId}` to `ProductController`: `@PathVariable Long productId`, delegate to `ProductService.getProductById`, return `200 OK` with `ProductResponse`; annotate with `@Operation` + `@ApiResponse` for `200` and `404` (`.../controller/ProductController.java`) | Critical | T2, T5, T7 | Blocked (waiting on T2, T5, T7) |
+| T9 | Verify generated OpenAPI spec (`/v3/api-docs`, `/swagger-ui.html`) reflects the new endpoint and the extended `Product`/`ProductResponse` schema (`description`, `availability`) | Medium | T8 | Blocked (waiting on T8) |
+| T10 | Unit tests: `ProductServiceImplTest` — `getProductById` found (maps `availability` correctly for both `IN_STOCK`/`OUT_OF_STOCK` boundary, i.e. `stock = 0` and `stock > 0`) and not-found (throws `ProductNotFoundException`); update existing `createProduct` tests for the new `description` field | High | T6, T7 | Blocked (waiting on T6, T7) |
+| T11 | Unit tests: `GlobalExceptionHandlerTest` — new `ProductNotFoundException` → `404` branch, new `MethodArgumentTypeMismatchException` → `400` branch | High | T5 | Blocked (waiting on T5) |
+| T12 | Controller tests (`@WebMvcTest ProductController`): positive `GET /products/{productId}` (200 + full `ProductResponse` body shape incl. `description`/`availability`); negative — non-existent ID (404 + `ErrorResponse`), non-numeric path value e.g. `/products/abc` (400 + `ErrorResponse`) | High | T8, T5 | Blocked (waiting on T8, T5) |
+| T13 | Repository/persistence tests (`@DataJpaTest`): save a `Product` with `description` set and with `description` left `null`; `findById` returns both correctly; non-existent ID returns empty `Optional` | Medium | T1 | Blocked (waiting on T1) |
+| T14 | Integration test (`@SpringBootTest`, full context + H2): end-to-end `GET /products/{productId}` happy path (200 + body shape), not-found path (404 + `ErrorResponse`), malformed-ID path (400 + `ErrorResponse`) | High | T8, T5 | Blocked (waiting on T8, T5) |
+| T15 | JaCoCo coverage verification: re-run `verify`, confirm ≥80% line/branch coverage still holds across the `product` package including all new/changed classes; fix any gaps surfaced by T10–T14 | Medium | T10, T11, T12, T13, T14 | Blocked (waiting on T10, T11, T12, T13, T14) |
 
 ## 2. Dependency Notes
 
-- **T2 → T1**: datasource configuration requires the Maven module, Spring Boot parent, and `h2`/`data-jpa` dependencies to exist first.
-- **T3 → T1**: the `Product` entity requires the `data-jpa` dependency and base package structure from scaffolding.
-- **T4 → T3**: `ProductRepository` is typed on `Product`, so the entity must exist first.
-- **T5 → T1**: `ErrorResponse` is a plain DTO but still needs the module/package structure in place.
-- **T6 → T5**: `GlobalExceptionHandler` builds and returns `ErrorResponse` instances, so the DTO shape must be defined first.
-- **T7 → T1**, **T8 → T1**: both DTOs only need the scaffolded module (Jakarta Validation dependency for T7); they have no dependency on the entity, keeping the public contract decoupled from persistence per NFR3.
-- **T9 → T3, T4, T7, T8**: `ProductServiceImpl` maps `ProductRequest` → `Product` → `ProductResponse` and calls `ProductRepository`, so all four must exist first.
-- **T10 → T7, T8, T9**: `ProductController` binds the request body to `ProductRequest`, returns `ProductResponse`, and delegates to `ProductService`.
-- **T11 → T10**: springdoc-openapi generates its spec from the controller/DTO annotations, so the controller must exist to annotate.
-- **T12 → T6, T7, T9**: unit tests target the exception handler, request validation, and service logic built in those tasks.
-- **T13 → T10, T6**: controller tests exercise the endpoint and rely on `GlobalExceptionHandler` translating validation failures into the expected 400/`ErrorResponse` shape.
-- **T14 → T2, T3, T4**: repository tests need a real (test) datasource, the entity, and the repository.
-- **T15 → T2, T4, T6, T10**: the end-to-end test needs a running datasource, repository, exception handler, and controller all wired together.
-- **T16 → T12, T13, T14, T15**: coverage can only be measured and enforced once the test suites that exercise the code exist.
+- **T5 → T4**: the new exception handler method signature depends on `ProductNotFoundException` existing first.
+- **T6 → T1, T3**: wiring `description` through `createProduct` needs both the entity column (T1) and the request DTO field (T3).
+- **T7 → T1, T2, T4**: `getProductById` needs the entity's `description` field, the response DTO's `description`/`availability` fields, and the not-found exception type.
+- **T8 → T2, T5, T7**: the new controller endpoint returns `ProductResponse` (T2), relies on `GlobalExceptionHandler` for both new error branches (T5), and delegates to the new service method (T7).
+- **T9 → T8**: the OpenAPI spec is generated from the controller's annotations, so the endpoint must exist first.
+- **T10 → T6, T7**: service-layer unit tests exercise both the updated `createProduct` (T6) and the new `getProductById` (T7).
+- **T11 → T5**: exception-handler unit tests target the two new handler methods directly.
+- **T12 → T8, T5**: controller tests exercise the new endpoint and depend on the exception handler translating both error cases correctly.
+- **T13 → T1**: repository tests need the extended entity to assert `description` persistence.
+- **T14 → T8, T5**: the end-to-end test needs the full request path (controller → service → repository) and both new error branches wired together.
+- **T15 → T10, T11, T12, T13, T14**: coverage can only be measured once all new/updated test suites exist.
 
 ## 3. Blocked Tasks
 
-All tasks except **T1** are currently blocked, since no implementation work has started:
+**T1**, **T2**, **T3**, and **T4** have no unmet dependencies and are `Ready` to start immediately (they can proceed in parallel). All other tasks are currently blocked:
 
-- **T2** — waiting on T1
-- **T3** — waiting on T1
-- **T4** — waiting on T3
-- **T5** — waiting on T1
-- **T6** — waiting on T5
-- **T7** — waiting on T1
-- **T8** — waiting on T1
-- **T9** — waiting on T3, T4, T7, T8
-- **T10** — waiting on T7, T8, T9
-- **T11** — waiting on T10
-- **T12** — waiting on T6, T7, T9
-- **T13** — waiting on T10, T6
-- **T14** — waiting on T2, T3, T4
-- **T15** — waiting on T2, T4, T6, T10
-- **T16** — waiting on T12, T13, T14, T15
+- **T5** — waiting on T4
+- **T6** — waiting on T1, T3
+- **T7** — waiting on T1, T2, T4
+- **T8** — waiting on T2, T5, T7
+- **T9** — waiting on T8
+- **T10** — waiting on T6, T7
+- **T11** — waiting on T5
+- **T12** — waiting on T8, T5
+- **T13** — waiting on T1
+- **T14** — waiting on T8, T5
+- **T15** — waiting on T10, T11, T12, T13, T14
 
-**T1** is the only task with no unmet dependencies and is `Ready` to start immediately.
+## 4. Out of Scope (per requirements.md / architecture.md)
+
+- `description` backfill for existing/historical product rows (returns `null` until explicitly set).
+- Any update/patch endpoint — `availability` must remain derived-only if one is added later (architecture.md §7.3).
+- `GET /products` (list), `POST /products` changes beyond the additive `description` field, `DELETE /products/{productId}`, and all `/orders*` endpoints.
+- Authentication/authorization (confirmed out of scope, requirements.md §7.4).

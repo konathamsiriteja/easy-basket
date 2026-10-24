@@ -22,6 +22,12 @@ public class ProductResponse {
     @Schema(description = "Available stock quantity", example = "100")
     private Integer stock;
 
+    @Schema(description = "Product description", example = "Ergonomic wireless mouse with USB receiver")
+    private String description;
+
+    @Schema(description = "Derived stock availability", example = "IN_STOCK")
+    private String availability;
+
     public ProductResponse() {
     }
 
@@ -31,6 +37,17 @@ public class ProductResponse {
         this.category = category;
         this.price = price;
         this.stock = stock;
+    }
+
+    public ProductResponse(Long id, String name, String category, BigDecimal price, Integer stock,
+            String description, String availability) {
+        this.id = id;
+        this.name = name;
+        this.category = category;
+        this.price = price;
+        this.stock = stock;
+        this.description = description;
+        this.availability = availability;
     }
 
     public Long getId() {
@@ -71,5 +88,21 @@ public class ProductResponse {
 
     public void setStock(Integer stock) {
         this.stock = stock;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public String getAvailability() {
+        return availability;
+    }
+
+    public void setAvailability(String availability) {
+        this.availability = availability;
     }
 }

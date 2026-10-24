@@ -1,109 +1,102 @@
-# Architecture: Create Product API (KAN-7)
+# Architecture: Get Product API (KAN-15)
 
 ## 1. Overview
 
-This document defines the technical design for `POST /products`, the first endpoint of the Product Management microservice within the Easy Basket backend (parent Epic KAN-6). The service accepts a product payload (name, category, price, stock), validates mandatory fields and value constraints, generates a unique product identifier, persists the product to an H2 relational database, and returns `201 Created` with the persisted resource. All error conditions — validation failures and unexpected runtime errors — are funneled through a single global exception handler, one instance per microservice, that produces consistent, meaningful `4xx`/`5xx` responses. The repository currently contains no application code, so this design establishes the initial Product Management service structure using the stack already implied by the requirements (Java, Spring Boot, H2), rather than introducing an unrelated stack.
+This document defines the technical design for `GET /products/{productId}`, extending the Product Management microservice (`com.easybasket.product`, parent Epic KAN-6) first established by KAN-7 (`POST /products`). The endpoint retrieves a single product by its numeric ID from the existing H2-backed `products` table and returns `200 OK` with the product's details, or `404 Not Found` when no product with that ID exists. Per the confirmed resolution of requirements OQ1 (Option (a)), this story also extends the `Product` entity and `ProductResponse` DTO to add a persisted `description` field and a derived `availability` field, closing the gap between the KAN-7 schema and the approved OpenAPI contract. All error conditions (not-found, malformed ID, unexpected runtime errors) continue to funnel through the single, existing `GlobalExceptionHandler`.
 
-> **Design review update (2026-08-15)**: all open risks/gaps from the initial review were resolved with the user and are recorded as Agreed Design Decisions in `documents/design-review.md`. This document has been updated accordingly; see §7 for a per-item summary.
+> **Design review update (2026-10-24)**: risks identified during design review were resolved and are recorded in `documents/design-review.md` §3. This document reflects those decisions; see §7 for a per-item summary.
 
 ## 2. Technology Choices
 
 | Choice | Rationale (tied to requirement) |
 |---|---|
-| **Java 17 (LTS)** | Requirements explicitly reference "Java/Spring Boot coding standards" (NFR1, FR requirements narrative). Java 17 is the current LTS baseline for modern Spring Boot 3.x. |
-| **Spring Boot 3.x (Web, Validation, Data JPA)** | Requirements narrative and NFR1 explicitly require "Spring Boot conventions." Spring Web supplies the REST controller model; Spring Validation (Jakarta Bean Validation) implements FR3–FR5 declaratively; Spring Data JPA implements FR7 (persistence) with minimal boilerplate. |
-| **H2 Database (file-based, per-service)** | FR7 explicitly mandates persistence "in an H2 database." A per-service H2 instance also keeps the Product Management service independently deployable (NFR4) with no shared database coupling. |
-| **Spring Data JPA + Hibernate ID generation (`GenerationType.IDENTITY`)** | FR6 requires a unique product ID per product; confirmed to use numeric auto-increment (`Long id`, `GenerationType.IDENTITY`) — see Assumptions & Risks §7.2. |
-| **Jakarta Bean Validation (`@NotBlank`, `@Size(max=255)`, `@NotNull`, `@Positive`, `@PositiveOrZero`, `@Digits`) on request DTOs** | Declarative validation directly satisfies FR3 (mandatory fields) and FR5 (reject negative/invalid price and stock) while keeping validation logic out of controller/service code (NFR1 clean code). `price` uses `@Positive` (0 is not valid) with `@Digits(integer=..., fraction=2)` for currency precision (USD assumed); `stock` uses `@PositiveOrZero` (0 is valid); `name`/`category` are capped at 255 characters via `@Size(max=255)`. |
-| **`@RestControllerAdvice` global exception handler** | FR9 and NFR6 explicitly require centralized error handling. Spring's `@RestControllerAdvice` + `@ExceptionHandler` is the idiomatic Spring Boot mechanism. Confirmed as one `@RestControllerAdvice` instance per microservice (this service owns its own copy; not a single component shared across services), consistent with NFR4 independent deployability. |
-| **springdoc-openapi (OpenAPI 3 / Swagger UI)** | NFR3/FR10 require the API to conform to an approved API/Swagger contract and for contract changes to be version-controlled and documented. Generating and publishing the OpenAPI spec from annotated controllers/DTOs gives a single source of truth that can be diffed and reviewed. |
-| **Maven (single-module, per-microservice repo layout)** | Standard, low-friction build tool for Spring Boot; each business capability (Product Management, future Order Management, etc.) is its own independently buildable/deployable module per NFR4. |
-| **JUnit 5 + Mockito + Spring Boot Test (`@WebMvcTest`, `@DataJpaTest`, `@SpringBootTest`)** | NFR2 requires unit and integration tests covering positive, negative, validation, and boundary scenarios. These are the standard Spring Boot testing layers, allowing controller-level, repository-level, and full-stack tests without duplicated setup. |
-| **JaCoCo (coverage plugin, enforced ≥80% via Maven build)** | NFR2 mandates a measurable minimum of 80% test coverage; JaCoCo integrates with Maven to fail the build below threshold, making the requirement enforceable rather than aspirational. |
-| **SLF4J + Logback (default Spring Boot logging)** | Supports observability of validation failures and exceptions handled by the global handler without adding a new dependency beyond the Spring Boot default. |
+| **Reuse existing stack (Java 17, Spring Boot 3.x Web/Validation/Data JPA, H2, springdoc-openapi, JUnit 5/Mockito, JaCoCo)** | No new technology is introduced; KAN-15 extends the Product Management service already built for KAN-7 (FR8, NFR4). |
+| **`Product` entity gains a nullable `description` column** | FR11/OQ1(a) requires persisting `description` per the contract's `Product` schema. Nullable because existing rows (and the KAN-7 create flow) predate this field; no backfill/migration story is in scope. |
+| **`availability` is computed, not persisted** | FR7/FR11 define `availability` as *derived* from `stock` (`stock > 0 ? IN_STOCK : OUT_OF_STOCK`). Persisting a value that must always mirror `stock` would risk drift; deriving it at response-mapping time in `ProductServiceImpl` keeps a single source of truth (NFR8 maintainability). |
+| **`ProductRequest` (create DTO) gains an optional `description` field** | Since `Product.description` is now a real column, the existing `createProduct` flow must be able to populate it; making it optional (`@Size(max = 1000)`, no `@NotBlank`) avoids a breaking change to the KAN-7 create contract (NFR3 contract compliance — no unannounced breaking change). |
+| **New `ProductNotFoundException` (unchecked `RuntimeException`)** | FR5 requires a `404` for a missing product. A dedicated, named exception thrown from the service layer keeps the controller thin (FR8) and lets the existing `@RestControllerAdvice` translate it to `404` without ad hoc try/catch (NFR6). |
+| **New `@ExceptionHandler(MethodArgumentTypeMismatchException.class)` in `GlobalExceptionHandler`** | FR6 requires malformed/non-numeric `productId` values to return `400` rather than `500`. Spring throws `MethodArgumentTypeMismatchException` (not `MethodArgumentNotValidException`) when a `@PathVariable Long` fails to bind from a non-numeric segment; today this would fall through to the generic `Exception` handler and incorrectly return `500`. A dedicated handler is required to meet FR6/NFR6. |
+| **`ProductRepository.findById(Long)` (existing, inherited from `JpaRepository`)** | Already available; no repository change needed. Satisfies FR3 and NFR5 (indexed primary-key lookup). |
 
 ## 3. Components
 
 | Component | Responsibility | Key Interfaces |
 |---|---|---|
-| **`ProductController`** | Exposes `POST /products`; delegates to the service layer; maps successful creation to `201 Created` with the `ProductResponse` body per contract (FR1, FR8, FR10). No `Location` header is set, since `GET /products/{id}` is not in scope for this story (see §7.8). | `POST /products(ProductRequest) -> ResponseEntity<ProductResponse>` |
-| **`ProductRequest` (DTO)** | Inbound payload shape; carries Bean Validation annotations for mandatory fields, strictly-positive price, non-negative stock, and length limits (FR3, FR5). | Fields: `name: String (@NotBlank @Size(max=255))`, `category: String (@NotBlank @Size(max=255))`, `price: BigDecimal (@NotNull @Positive @Digits(integer=..., fraction=2))`, `stock: Integer (@NotNull @PositiveOrZero)` |
-| **`ProductResponse` (DTO)** | Outbound payload shape returned on success; decouples persistence entity from the public contract (NFR3/FR10). | Fields: `id`, `name`, `category`, `price`, `stock` (+ any contract-mandated metadata once confirmed) |
-| **`ProductService` (interface) / `ProductServiceImpl`** | Business logic: orchestrates ID generation, delegates persistence, maps entity ⇄ DTO; keeps controller thin (NFR1). | `createProduct(ProductRequest) -> ProductResponse` |
-| **`Product` (JPA entity)** | Persistent representation of a product; owns ID generation strategy and maps to the H2 schema (FR6, FR7). | Fields: `id`, `name`, `category`, `price`, `stock` |
-| **`ProductRepository`** | Spring Data JPA repository abstracting H2 persistence (FR7). | `extends JpaRepository<Product, ID>` |
-| **`GlobalExceptionHandler` (`@RestControllerAdvice`)** | Single instance, scoped to this microservice, translating validation errors (`MethodArgumentNotValidException`), constraint violations, and unhandled exceptions into consistent `4xx`/`5xx` error responses (FR4, FR9, NFR6). One `@RestControllerAdvice` per microservice, not shared across services. | `@ExceptionHandler(MethodArgumentNotValidException.class)`, `@ExceptionHandler(Exception.class)` → `ErrorResponse` body |
-| **`ErrorResponse` (DTO)** | Standard error payload shape (status, message, field errors, timestamp) used by the global handler for every rejected request. | Fields: `status`, `error`, `message`, `fieldErrors[]`, `timestamp` |
-| **OpenAPI/Swagger definition** | Machine-readable contract generated from controller/DTO annotations; basis for contract-compliance verification (NFR3, FR10). | `/v3/api-docs`, `/swagger-ui.html` |
-| **H2 Database (per-service datastore)** | Durable storage for product records, isolated to the Product Management service (FR7, NFR4). | JDBC connection via Spring Data JPA; no external service accesses it directly |
+| **`ProductController`** | Adds `GET /products/{productId}`; delegates to the service layer; maps a found product to `200 OK` with `ProductResponse` (FR1, FR2, FR10). Not-found/malformed-ID handling is delegated entirely to `GlobalExceptionHandler` — the controller method itself contains no branching. | `GET /products/{productId}(Long) -> ResponseEntity<ProductResponse>` |
+| **`ProductResponse` (DTO, extended)** | Adds `description: String` and `availability: String` (enum-valued: `IN_STOCK`/`OUT_OF_STOCK`) to the existing `id`, `name`, `category`, `price`, `stock` fields (FR4, FR7, FR11). | Fields: `id`, `name`, `category`, `price`, `stock`, `description`, `availability` |
+| **`ProductRequest` (DTO, extended)** | Adds an optional `description: String` field (`@Size(max = 1000)`, no mandatory-presence constraint) so newly created products can carry a description; unset values map to `null` (FR11). | Fields: `name`, `category`, `price`, `stock`, `description` (optional) |
+| **`ProductService` (interface, extended) / `ProductServiceImpl`** | Adds `getProductById(Long productId)`: looks up the entity via `ProductRepository.findById`, throws `ProductNotFoundException` if absent, otherwise maps the entity to `ProductResponse` including the derived `availability` (FR3, FR4, FR9). | `getProductById(Long) -> ProductResponse` (throws `ProductNotFoundException`) |
+| **`Product` (JPA entity, extended)** | Adds a nullable `description` column (`@Column(length = 1000)`, no `@Column(nullable = false)`) (FR11). | Fields: `id`, `name`, `category`, `price`, `stock`, `description` |
+| **`ProductRepository`** | Unchanged; `findById(Long)` inherited from `JpaRepository<Product, Long>` is reused (FR3). | `extends JpaRepository<Product, Long>` |
+| **`ProductNotFoundException` (new, `exception` package)** | Unchecked exception carrying the missing `productId`; thrown by `ProductServiceImpl.getProductById` (FR5). | `ProductNotFoundException(Long productId)` |
+| **`GlobalExceptionHandler` (extended)** | Adds two handlers: `@ExceptionHandler(ProductNotFoundException.class)` → `404` `ErrorResponse`; `@ExceptionHandler(MethodArgumentTypeMismatchException.class)` → `400` `ErrorResponse` (FR5, FR6, NFR6). Existing validation/generic handlers are unchanged. | `handleProductNotFound(...)`, `handleTypeMismatch(...)` → `ErrorResponse` |
+| **`ErrorResponse` (DTO)** | Unchanged; reused as-is for both new error branches (`status`, `error`, `message`, `fieldErrors[]`, `timestamp`) (FR5). | No changes |
+| **OpenAPI/Swagger definition** | `GET /products/{productId}` annotated with `@Operation` + `@ApiResponse` for `200` and `404`, keeping the generated spec accurate (FR10, NFR3). | `/v3/api-docs`, `/swagger-ui.html` |
+| **H2 Database** | Unchanged datastore; schema gains the new nullable `description` column via Hibernate DDL auto-update (consistent with KAN-7's existing schema-generation approach). | JDBC via Spring Data JPA |
 
 ## 4. Component Diagram
 
 ```mermaid
 flowchart TD
-    Client["API Client"] -->|"POST /products"| Controller["ProductController"]
-    Controller -->|"validated ProductRequest"| Service["ProductService / ProductServiceImpl"]
-    Controller -.->|"validation failure"| GEH["GlobalExceptionHandler"]
-    Service -->|"map to entity, request ID generation"| Entity["Product (JPA Entity)"]
-    Service -->|"save(product)"| Repo["ProductRepository"]
+    Client["API Client"] -->|"GET /products/{productId}"| Controller["ProductController"]
+    Controller -->|"productId: Long"| Service["ProductService / ProductServiceImpl"]
+    Controller -.->|"non-numeric productId"| GEH["GlobalExceptionHandler"]
+    Service -->|"findById(productId)"| Repo["ProductRepository"]
     Repo --> DB[("H2 Database")]
-    Service -.->|"runtime/persistence exception"| GEH
-    Service -->|"map to ProductResponse"| Controller
-    Controller -->|"201 Created + ProductResponse"| Client
-    GEH -->|"4xx/5xx + ErrorResponse"| Client
+    Repo -.->|"empty Optional"| NotFoundPath["throw ProductNotFoundException"]
+    NotFoundPath -.-> GEH
+    Service -->|"map entity to ProductResponse + derive availability"| Controller
+    Controller -->|"200 OK + ProductResponse"| Client
+    GEH -->|"400 / 404 / 500 + ErrorResponse"| Client
     Spec["OpenAPI / Swagger Contract"] -.->|"describes"| Controller
 ```
 
 ## 5. Positive & Negative Data Flow
 
-### 5.1 Positive flow — successful product creation
+### 5.1 Positive flow — product found
 
-1. Client sends `POST /products` with a JSON body containing valid `name`, `category` (both ≤ 255 characters), `price` (strictly > 0, up to 2 decimal places), and `stock` (≥ 0).
-2. `ProductController` receives the request; Spring binds it to `ProductRequest` and triggers Jakarta Bean Validation (`@Valid`).
-3. Validation passes (all mandatory fields present and within length limits, `price` strictly positive, `stock` non-negative).
-4. `ProductController` calls `ProductService.createProduct(request)`.
-5. `ProductServiceImpl` maps the DTO to a `Product` entity and calls `ProductRepository.save(product)`.
-6. Spring Data JPA/Hibernate generates a unique ID (FR6) and persists the row to H2 (FR7).
-7. The saved entity is mapped to a `ProductResponse` and returned to the controller.
-8. `ProductController` returns `HTTP 201 Created` with the `ProductResponse` body only. No `Location` header is set, since `GET /products/{id}` does not exist in this story's scope (§7.8), matching the approved API contract (FR8, FR10).
+1. Client sends `GET /products/{productId}` with a numeric path value (e.g., `/products/1`).
+2. `ProductController` binds `productId` to a `Long` method parameter and calls `ProductService.getProductById(productId)`.
+3. `ProductServiceImpl` calls `ProductRepository.findById(productId)`, which returns a populated `Optional<Product>`.
+4. The entity is mapped to a `ProductResponse`, including `description` (as persisted, possibly `null`) and `availability` (derived: `stock > 0 ? "IN_STOCK" : "OUT_OF_STOCK"`).
+5. `ProductController` returns `HTTP 200 OK` with the `ProductResponse` body (FR4, FR7).
 
-### 5.2 Negative flow — validation failure (missing/invalid field or negative value)
+### 5.2 Negative flow — product not found
 
-1. Client sends `POST /products` with a missing mandatory field (e.g., `name` blank), an oversized `name`/`category` (> 255 characters), a `price` that is zero, negative, or has more than 2 decimal places, or a negative `stock`.
-2. `ProductController` receives the request; Spring's `@Valid` binding fails Bean Validation before the controller method body executes.
-3. Spring raises `MethodArgumentNotValidException`, which propagates past the controller (request never reaches `ProductService`).
-4. `GlobalExceptionHandler.handleValidation(...)` intercepts the exception, extracts per-field validation errors, and builds an `ErrorResponse` (FR4, FR9, NFR6).
-5. The handler returns `HTTP 400 Bad Request` with a body listing the specific field(s) and reason(s) that failed (meaningful error message, no product persisted).
+1. Client sends `GET /products/{productId}` with a well-formed but non-existent numeric ID (e.g., `/products/9999`).
+2. `ProductRepository.findById(productId)` returns an empty `Optional<Product>`.
+3. `ProductServiceImpl.getProductById` throws `ProductNotFoundException(productId)` instead of returning normally.
+4. `GlobalExceptionHandler.handleProductNotFound(...)` intercepts the exception and builds an `ErrorResponse` (`status=404`, `error="Not Found"`, `message="Product not found with id: <productId>"`, `fieldErrors=[]`).
+5. Client receives `HTTP 404 Not Found` (FR5).
 
-### 5.3 Negative flow — unexpected/persistence error
+### 5.3 Negative flow — malformed productId
 
-1. Client sends a structurally valid request, but persistence fails (e.g., H2 connectivity/constraint issue) or an unforeseen runtime exception occurs in `ProductServiceImpl`.
-2. The exception propagates up through the controller.
-3. `GlobalExceptionHandler.handleGeneric(Exception ex)` catches it, logs the failure (via SLF4J) without leaking internal stack traces to the client, and returns a generic `ErrorResponse`.
-4. Client receives `HTTP 500 Internal Server Error` (or a mapped `4xx` if the cause is client-attributable, e.g., a future duplicate-key rule) with a consistent error shape identical to the validation-failure response structure.
+1. Client sends `GET /products/{productId}` with a non-numeric path value (e.g., `/products/abc`).
+2. Spring's path-variable binding fails to convert `"abc"` to `Long` and throws `MethodArgumentTypeMismatchException` before the controller method body executes (the request never reaches `ProductService`).
+3. `GlobalExceptionHandler.handleTypeMismatch(...)` intercepts the exception and builds an `ErrorResponse` (`status=400`, `error="Bad Request"`, `message="productId must be a valid numeric value"`, `fieldErrors=[]`).
+4. Client receives `HTTP 400 Bad Request` (FR6) — consistent, structured error instead of an unhandled `500`.
+
+### 5.4 Negative flow — unexpected/persistence error
+
+1. An unforeseen runtime exception occurs during lookup (e.g., H2 connectivity issue).
+2. The exception propagates to `GlobalExceptionHandler.handleGeneric(Exception ex)` (unchanged from KAN-7), which logs via SLF4J and returns a generic `500` `ErrorResponse` without leaking internal details.
 
 ## 6. Non-Functional Considerations
 
-- **Test Coverage ≥ 80% (NFR2)**: JaCoCo is bound to the Maven `verify` phase with a coverage rule enforcing ≥80% line/branch coverage for the `product` package; the build fails if unmet. Test layers: `@WebMvcTest` for controller + validation behavior (positive, missing-field, oversized `name`/`category` (> 255 chars), boundary `stock=0` (valid) and `price=0` (invalid — must be rejected) cases, and `price` with more than 2 decimal places), `@DataJpaTest` for repository/persistence behavior, and a `@SpringBootTest` (full context, H2) integration test for the end-to-end `POST /products` happy path and error path. Coverage measurement and enforcement are recorded in `documents/testing-strategy.md` by the test-verification stage of this workflow, not in this document.
-- **Contract Compliance (NFR3, FR1, FR10)**: springdoc-openapi generates the live OpenAPI spec directly from `ProductController`/DTO annotations, so the implementation and the published contract cannot drift silently. Any change to request/response shape requires a corresponding, reviewable diff to the generated spec, satisfying the "version-controlled and documented" requirement from Confluence. Contract conformance (field names, types, status codes) is verified in controller-level tests that assert exact JSON shape.
-- **Microservice Independence (NFR4)**: The Product Management capability is scoped to its own Maven module/deployable unit with its own embedded H2 instance and no compile-time or runtime dependency on other business capabilities (e.g., Order Management). All product-domain classes live under a single `product` package/module boundary so the service can be extracted to its own repository later without cross-cutting refactors.
-- **Scalability (NFR5)**: The service is stateless per request (no in-memory session state) and uses connection-pooled JPA access, so multiple instances can run behind a load balancer for horizontal scaling. H2 is confirmed as the datastore for this story only (see §7.7); no follow-up migration ticket is planned as part of this design.
-- **Error Handling (NFR6, FR4, FR9)**: A single `@RestControllerAdvice` (`GlobalExceptionHandler`), one instance per microservice, is the only place within this service that translates exceptions to HTTP responses, ensuring every error — validation, persistence, or unexpected — returns the same `ErrorResponse` shape and appropriate status code, rather than ad hoc try/catch blocks scattered across controllers. This is a per-microservice pattern, not a component shared across services (see §7.9).
-- **Security**: No authentication/authorization is implemented for this story per confirmed decision (§7.1). This is a deliberate, agreed scope exclusion, not a silent omission.
+- **Test Coverage ≥ 80% (NFR2)**: Existing JaCoCo Maven-bound rule continues to apply across the `product` package, now including the new `getProductById` service method, the two new exception handlers, and the extended DTO/entity mapping. Test layers: `@WebMvcTest` for the controller (found, not-found, malformed-ID cases), unit tests for `ProductServiceImpl.getProductById` (found/not-found via mocked `ProductRepository`), and a `@SpringBootTest` integration test for the full `GET /products/{productId}` happy/error paths. Recorded in `documents/testing-strategy.md` by the test-verification stage of this workflow.
+- **Contract Compliance (NFR3, FR1, FR7, FR10)**: `ProductResponse` now matches the full contract `Product` schema (`id`, `name`, `description`, `category`, `price`, `stock`, `availability`). springdoc-openapi regenerates the spec from the updated annotations, so the diff is reviewable.
+- **Microservice Independence (NFR4)**: No new cross-capability dependency is introduced; all changes stay within the existing `product` package/module.
+- **Performance (NFR5)**: `findById` uses the primary-key index (default JPA/Hibernate behavior) — no additional query design needed.
+- **Error Handling (NFR6, FR5, FR6)**: Both new error branches (`404`, malformed-ID `400`) go through the single existing `GlobalExceptionHandler`, preserving the one-handler-per-microservice pattern from KAN-7; no ad hoc try/catch is added to the controller or service.
+- **Security**: No authentication/authorization is implemented for this endpoint, per confirmed decision (requirements.md §7.4) — consistent with KAN-7's existing scope exclusion.
 
 ## 7. Assumptions & Risks
 
-*The following items were reviewed during design review and confirmed with the user on 2026-08-15 (see `documents/design-review.md` §3, Agreed Design Decisions). Each is now a confirmed decision for this story, not an open assumption.*
+*Reviewed during design review on 2026-10-24; resolutions recorded in `documents/design-review.md` §3.*
 
-1. **No authentication/authorization required for this story (confirmed).** `POST /products` is implemented as an open endpoint. This is a deliberate scope exclusion for KAN-7; no follow-up security ticket was requested.
-2. **Product ID generation strategy confirmed as `GenerationType.IDENTITY` (numeric auto-increment `Long id`).**
-3. **`stock = 0` is valid; only negative values are rejected.** Validation uses `@PositiveOrZero` for `stock`.
-4. **`price` must be strictly positive; `price = 0` is not valid (confirmed).** Validation uses `@Positive` (not `@PositiveOrZero`) for `price`, in addition to `@Digits(integer=..., fraction=2)` for 2-decimal-place USD currency precision (§7.10). This corrects the design's earlier `@PositiveOrZero` assumption for `price`.
-5. **No product-name uniqueness constraint (confirmed).** No unique index/constraint is planned on `Product.name` for this story; duplicate product names are accepted.
-6. **Product schema confirmed as `name`, `category`, `price`, `stock`, plus a generated `id` — no additional fields.** No SKU, description, image URL, or category-as-entity are in scope for this story.
-7. **H2 confirmed as the datastore for this story (no follow-up ticket).** A horizontally scaled deployment (NFR5) sharing a single H2 file/instance across replicas is not a typical production pattern, but migrating to a shared, durable datastore is explicitly out of scope and not tracked as a follow-up per the agreed decision.
-8. **No `Location` header on `201 Created` responses (confirmed).** The header is omitted because `GET /products/{id}` does not exist; only `POST /products` is in scope for this story.
-9. **`GlobalExceptionHandler` is one instance per microservice (confirmed).** This service includes exactly one `@RestControllerAdvice`; it is not a single component shared across services, consistent with NFR4 independent deployability.
-10. **`price` precision confirmed at 2 decimal places (`@Digits(integer=..., fraction=2)`), USD currency assumed.**
-11. **`name` and `category` confirmed at max length 255 characters (`@Size(max=255)`).**
-12. **Confluence page truncation — no further re-fetch needed (confirmed).** `documents/requirements.md`'s functional/non-functional/acceptance criteria are treated as sufficient as-is for this story.
+1. **`description` column is nullable with no `@NotBlank`/mandatory constraint.** Existing KAN-7 rows and any product created without a `description` will return `description: null` in the `GET` response. This is consistent with OQ1 Option (a), which only requires the field to exist and be populated going forward, not backfilled.
+2. **`description` max length set to 1000 characters** (`@Column(length = 1000)`, `@Size(max = 1000)` on the optional create-side field) — not specified by the contract; chosen as a reasonable, generous bound consistent with free-text product descriptions, well above the `name`/`category` 255-char limit already in use.
+3. **`availability` is always computed, never persisted or settable via the create/update DTOs.** It is purely a derived view of `stock` (`stock > 0 ? IN_STOCK : OUT_OF_STOCK`) at response-mapping time, so it can never drift out of sync with `stock`.
+4. **`ProductRequest` (create DTO) is extended with an optional `description` field as a non-breaking addition.** Existing KAN-7 clients omitting `description` continue to work unchanged (field defaults to `null`); this is additive, not a breaking contract change, so it does not require a new API version.
+5. **`MethodArgumentTypeMismatchException` is the correct exception type for a non-numeric `@PathVariable Long`.** Confirmed against current Spring MVC behavior (Spring Boot 3.x); this exception is distinct from `MethodArgumentNotValidException` (body validation) and must be handled separately in `GlobalExceptionHandler`, or malformed IDs would incorrectly surface as `500`.
+6. **No `Location`/pagination/list-endpoint concerns apply here.** `GET /products` (list) and the other contract endpoints remain explicitly out of scope for KAN-15 (per requirements.md §2).

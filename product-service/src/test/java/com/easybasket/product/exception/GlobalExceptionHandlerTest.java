@@ -2,11 +2,13 @@ package com.easybasket.product.exception;
 
 import com.easybasket.product.dto.ErrorResponse;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.List;
 
@@ -33,6 +35,35 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody().getStatus()).isEqualTo(400);
         assertThat(response.getBody().getFieldErrors()).containsExactly("name: name is mandatory");
         assertThat(response.getBody().getTimestamp()).isNotNull();
+    }
+
+    @Test
+    void handleProductNotFound_returnsNotFoundWithMessage() {
+        ProductNotFoundException ex = new ProductNotFoundException(42L);
+
+        ResponseEntity<ErrorResponse> response = handler.handleProductNotFound(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getStatus()).isEqualTo(404);
+        assertThat(response.getBody().getMessage()).isEqualTo("Product not found with id: 42");
+        assertThat(response.getBody().getFieldErrors()).isEmpty();
+        assertThat(response.getBody().getTimestamp()).isNotNull();
+    }
+
+    @Test
+    void handleTypeMismatch_returnsBadRequestWithMessage() {
+        MethodParameter methodParameter = mock(MethodParameter.class);
+        MethodArgumentTypeMismatchException ex = new MethodArgumentTypeMismatchException(
+                "abc", Long.class, "productId", methodParameter, new NumberFormatException("abc"));
+
+        ResponseEntity<ErrorResponse> response = handler.handleTypeMismatch(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getStatus()).isEqualTo(400);
+        assertThat(response.getBody().getMessage()).isEqualTo("productId must be a valid numeric value");
+        assertThat(response.getBody().getFieldErrors()).isEmpty();
     }
 
     @Test

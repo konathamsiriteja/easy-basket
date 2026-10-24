@@ -138,4 +138,36 @@ class ProductRequestValidationTest {
 
         assertThat(violations).isEmpty();
     }
+
+    @Test
+    void missingDescription_isValid() {
+        ProductRequest request = new ProductRequest("Wireless Mouse", "Electronics", new BigDecimal("19.99"), 100);
+
+        Set<ConstraintViolation<ProductRequest>> violations = validator.validate(request);
+
+        assertThat(violations).isEmpty();
+        assertThat(request.getDescription()).isNull();
+    }
+
+    @Test
+    void oversizedDescription_isRejected() {
+        String tooLong = "d".repeat(1001);
+        ProductRequest request = new ProductRequest("Wireless Mouse", "Electronics", new BigDecimal("19.99"), 100,
+                tooLong);
+
+        Set<ConstraintViolation<ProductRequest>> violations = validator.validate(request);
+
+        assertThat(violations).anyMatch(v -> v.getPropertyPath().toString().equals("description"));
+    }
+
+    @Test
+    void descriptionAtMaxLength_isValid() {
+        String maxLength = "d".repeat(1000);
+        ProductRequest request = new ProductRequest("Wireless Mouse", "Electronics", new BigDecimal("19.99"), 100,
+                maxLength);
+
+        Set<ConstraintViolation<ProductRequest>> violations = validator.validate(request);
+
+        assertThat(violations).isEmpty();
+    }
 }

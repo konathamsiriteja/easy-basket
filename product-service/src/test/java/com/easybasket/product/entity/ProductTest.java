@@ -16,12 +16,29 @@ class ProductTest {
         product.setCategory("Electronics");
         product.setPrice(new BigDecimal("19.99"));
         product.setStock(100);
+        product.setDescription("Ergonomic wireless mouse");
 
         assertThat(product.getId()).isEqualTo(1L);
         assertThat(product.getName()).isEqualTo("Wireless Mouse");
         assertThat(product.getCategory()).isEqualTo("Electronics");
         assertThat(product.getPrice()).isEqualByComparingTo("19.99");
         assertThat(product.getStock()).isEqualTo(100);
+        assertThat(product.getDescription()).isEqualTo("Ergonomic wireless mouse");
+    }
+
+    @Test
+    void descriptionArgsConstructor_populatesDescription() {
+        Product product = new Product("Wireless Mouse", "Electronics", new BigDecimal("19.99"), 100,
+                "Ergonomic wireless mouse");
+
+        assertThat(product.getDescription()).isEqualTo("Ergonomic wireless mouse");
+    }
+
+    @Test
+    void fourArgConstructor_leavesDescriptionNull() {
+        Product product = new Product("Widget", "Tools", BigDecimal.ONE, 1);
+
+        assertThat(product.getDescription()).isNull();
     }
 
     @Test
